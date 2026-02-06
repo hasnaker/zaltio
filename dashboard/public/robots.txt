@@ -1,0 +1,16 @@
+# Zalt.io Robots.txt
+# https://zalt.io
+
+User-agent: *
+Allow: /
+
+# Disallow dashboard and API routes
+Disallow: /dashboard/
+Disallow: /api/
+Disallow: /onboarding/
+
+# Allow documentation
+Allow: /docs/
+
+# Sitemap
+Sitemap: https://zalt.io/sitemap.xml

@@ -1,0 +1,13 @@
+{
+  "enabled": false,
+  "name": "Zalt New Project Auth Setup",
+  "description": "Set up Zalt authentication in a new project (manual trigger)",
+  "version": "1",
+  "when": {
+    "type": "manual"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Set up Zalt authentication in this project:\n\n1. DETECT PROJECT TYPE:\n   - Check for package.json\n   - Identify framework: Next.js, React, Node.js, etc.\n\n2. INSTALL PACKAGES:\n   - Next.js: @zalt/core @zalt/react @zalt/next\n   - React: @zalt/core @zalt/react\n   - Node.js: @zalt/core\n\n3. CREATE CONFIG FILES:\n   - .env.local with ZALT_REALM_ID placeholder\n   - For Next.js: middleware.ts with zaltMiddleware\n\n4. SET UP PROVIDER:\n   - For React/Next.js: Wrap app with ZaltProvider\n   - Add realmId from environment variable\n\n5. CREATE EXAMPLE COMPONENTS:\n   - Login form component\n   - Protected route example\n   - User profile component\n\n6. ADD DOCUMENTATION:\n   - README section for auth setup\n   - Environment variables needed\n   - Links to Zalt docs\n\nASK USER:\n- What is your Zalt realm ID?\n- Do you need MFA support?\n- Do you need WebAuthn/Passkeys?"
+  }
+}

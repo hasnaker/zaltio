@@ -1,0 +1,21 @@
+version: 1
+frontend:
+  phases:
+    preBuild:
+      commands:
+        - ls -la
+        - cd dashboard
+        - pwd
+        - npm ci --legacy-peer-deps
+    build:
+      commands:
+        - cd dashboard
+        - npm run build
+  artifacts:
+    baseDirectory: dashboard/.next
+    files:
+      - '**/*'
+  cache:
+    paths:
+      - dashboard/node_modules/**/*
+      - dashboard/.next/cache/**/*

@@ -1,0 +1,849 @@
+openapi: 3.0.3
+info:
+  title: HSD Auth Platform API
+  description: |
+    HSD Auth Platform - Authentication as a Service API
+    
+    Bu API, HSD projelerinde kimlik doğrulama işlemleri için kullanılır.
+    
+    ## Authentication
+    API istekleri için JWT Bearer token veya API Key kullanılabilir.
+    
+    ## Rate Limiting
+    - Varsayılan: 100 istek/dakika
+    - Rate limit aşıldığında 429 Too Many Requests döner
+  version: 1.0.0
+  contact:
+    name: HSD Auth Support
+    email: support@hsdcore.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: https://api.auth.hsdcore.com
+    description: Production server
+  - url: https://api.staging.auth.hsdcore.com
+    description: Staging server
+
+tags:
+  - name: Authentication
+    description: Kimlik doğrulama işlemleri
+  - name: Users
+    description: Kullanıcı yönetimi
+  - name: Sessions
+    description: Oturum yönetimi
+  - name: Admin
+    description: Yönetici işlemleri
+  - name: Realms
+    description: Realm yönetimi
+
+security:
+  - BearerAuth: []
+  - ApiKeyAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags:
+        - Authentication
+      summary: Yeni kullanıcı kaydı
+      operationId: register
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: Kayıt başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '409':
+          description: Email zaten kayıtlı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /auth/login:
+    post:
+      tags:
+        - Authentication
+      summary: Kullanıcı girişi
+      operationId: login
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Giriş başarılı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /auth/logout:
+    post:
+      tags:
+        - Authentication
+      summary: Oturumu sonlandır
+      operationId: logout
+      responses:
+        '200':
+          description: Çıkış başarılı
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/refresh:
+    post:
+      tags:
+        - Authentication
+      summary: Token yenileme
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - refreshToken
+              properties:
+                refreshToken:
+                  type: string
+      responses:
+        '200':
+          description: Token yenilendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /auth/forgot-password:
+    post:
+      tags:
+        - Authentication
+      summary: Şifre sıfırlama isteği
+      operationId: forgotPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Şifre sıfırlama e-postası gönderildi
+        '404':
+          description: Kullanıcı bulunamadı
+
+  /auth/reset-password:
+    post:
+      tags:
+        - Authentication
+      summary: Şifre sıfırlama
+      operationId: resetPassword
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - token
+                - newPassword
+              properties:
+                token:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Şifre başarıyla sıfırlandı
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /users/me:
+    get:
+      tags:
+        - Users
+      summary: Mevcut kullanıcı bilgisi
+      operationId: getCurrentUser
+      responses:
+        '200':
+          description: Kullanıcı bilgisi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+    patch:
+      tags:
+        - Users
+      summary: Profil güncelleme
+      operationId: updateProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileUpdateRequest'
+      responses:
+        '200':
+          description: Profil güncellendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /users/me/password:
+    put:
+      tags:
+        - Users
+      summary: Şifre değiştirme
+      operationId: changePassword
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - currentPassword
+                - newPassword
+              properties:
+                currentPassword:
+                  type: string
+                newPassword:
+                  type: string
+                  minLength: 8
+      responses:
+        '200':
+          description: Şifre değiştirildi
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sessions:
+    get:
+      tags:
+        - Sessions
+      summary: Aktif oturumları listele
+      operationId: listSessions
+      responses:
+        '200':
+          description: Oturum listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /sessions/{sessionId}:
+    delete:
+      tags:
+        - Sessions
+      summary: Oturumu sonlandır
+      operationId: terminateSession
+      parameters:
+        - name: sessionId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Oturum sonlandırıldı
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          description: Oturum bulunamadı
+
+  /admin/realms:
+    get:
+      tags:
+        - Realms
+      summary: Realm listesi
+      operationId: listRealms
+      responses:
+        '200':
+          description: Realm listesi
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Realm'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      tags:
+        - Realms
+      summary: Yeni realm oluştur
+      operationId: createRealm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRealmRequest'
+      responses:
+        '201':
+          description: Realm oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Realm'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /admin/realms/{realmId}:
+    get:
+      tags:
+        - Realms
+      summary: Realm detayı
+      operationId: getRealm
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+      responses:
+        '200':
+          description: Realm detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Realm'
+        '404':
+          description: Realm bulunamadı
+    patch:
+      tags:
+        - Realms
+      summary: Realm güncelle
+      operationId: updateRealm
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateRealmRequest'
+      responses:
+        '200':
+          description: Realm güncellendi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Realm'
+    delete:
+      tags:
+        - Realms
+      summary: Realm sil
+      operationId: deleteRealm
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+      responses:
+        '204':
+          description: Realm silindi
+        '404':
+          description: Realm bulunamadı
+
+  /admin/realms/{realmId}/users:
+    get:
+      tags:
+        - Admin
+      summary: Realm kullanıcılarını listele
+      operationId: listRealmUsers
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, disabled, pending]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Kullanıcı listesi
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedUsers'
+    post:
+      tags:
+        - Admin
+      summary: Kullanıcı oluştur
+      operationId: createUser
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUserRequest'
+      responses:
+        '201':
+          description: Kullanıcı oluşturuldu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+
+  /admin/realms/{realmId}/users/{userId}:
+    get:
+      tags:
+        - Admin
+      summary: Kullanıcı detayı
+      operationId: getUser
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200':
+          description: Kullanıcı detayı
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/User'
+    patch:
+      tags:
+        - Admin
+      summary: Kullanıcı güncelle
+      operationId: updateUser
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/UserId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateUserRequest'
+      responses:
+        '200':
+          description: Kullanıcı güncellendi
+    delete:
+      tags:
+        - Admin
+      summary: Kullanıcı sil
+      operationId: deleteUser
+      parameters:
+        - $ref: '#/components/parameters/RealmId'
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '204':
+          description: Kullanıcı silindi
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+
+  parameters:
+    RealmId:
+      name: realmId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Realm ID
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+      description: User ID
+
+  responses:
+    Unauthorized:
+      description: Kimlik doğrulama gerekli
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Forbidden:
+      description: Yetkisiz erişim
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    ValidationError:
+      description: Doğrulama hatası
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+    RateLimited:
+      description: Rate limit aşıldı
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: Saniye cinsinden bekleme süresi
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: object
+
+    ValidationError:
+      type: object
+      properties:
+        code:
+          type: string
+          example: VALIDATION_ERROR
+        message:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              message:
+                type: string
+
+    RegisterRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+        profile:
+          $ref: '#/components/schemas/ProfileInput'
+
+    LoginRequest:
+      type: object
+      required:
+        - email
+        - password
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    AuthResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+
+    TokenResponse:
+      type: object
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresIn:
+          type: integer
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        emailVerified:
+          type: boolean
+        status:
+          type: string
+          enum: [active, disabled, pending]
+        profile:
+          $ref: '#/components/schemas/Profile'
+        roles:
+          type: array
+          items:
+            type: string
+        mfaEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    Profile:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        avatarUrl:
+          type: string
+        metadata:
+          type: object
+
+    ProfileInput:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        avatarUrl:
+          type: string
+
+    ProfileUpdateRequest:
+      type: object
+      properties:
+        firstName:
+          type: string
+        lastName:
+          type: string
+        avatarUrl:
+          type: string
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        ipAddress:
+          type: string
+        userAgent:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        lastActiveAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+
+    Realm:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        status:
+          type: string
+          enum: [active, disabled]
+        settings:
+          $ref: '#/components/schemas/RealmSettings'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    RealmSettings:
+      type: object
+      properties:
+        sessionTimeout:
+          type: integer
+          description: Oturum zaman aşımı (saniye)
+        maxConcurrentSessions:
+          type: integer
+        passwordPolicy:
+          $ref: '#/components/schemas/PasswordPolicy'
+        mfa:
+          $ref: '#/components/schemas/MfaSettings'
+
+    PasswordPolicy:
+      type: object
+      properties:
+        minLength:
+          type: integer
+        requireUppercase:
+          type: boolean
+        requireLowercase:
+          type: boolean
+        requireNumbers:
+          type: boolean
+        requireSpecialChars:
+          type: boolean
+
+    MfaSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        required:
+          type: boolean
+        methods:
+          type: array
+          items:
+            type: string
+            enum: [totp, sms]
+
+    CreateRealmRequest:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        settings:
+          $ref: '#/components/schemas/RealmSettings'
+
+    UpdateRealmRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        description:
+          type: string
+        settings:
+          $ref: '#/components/schemas/RealmSettings'
+
+    CreateUserRequest:
+      type: object
+      required:
+        - email
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+        profile:
+          $ref: '#/components/schemas/ProfileInput'
+        roles:
+          type: array
+          items:
+            type: string
+        emailVerified:
+          type: boolean
+        requirePasswordReset:
+          type: boolean
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        email:
+          type: string
+          format: email
+        profile:
+          $ref: '#/components/schemas/ProfileInput'
+        roles:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, disabled]
+
+    PaginatedUsers:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/User'
+        pagination:
+          type: object
+          properties:
+            page:
+              type: integer
+            limit:
+              type: integer
+            total:
+              type: integer
+            totalPages:
+              type: integer

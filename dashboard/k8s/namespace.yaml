@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: zalt
+  labels:
+    app.kubernetes.io/name: zalt
+    app.kubernetes.io/part-of: zalt-platform

@@ -1,0 +1,76 @@
+# SAM CLI Configuration for Zalt Auth Platform
+# Validates: Requirements 7.1, 5.1, 5.2, 5.5
+
+version = 0.1
+
+[default]
+[default.global.parameters]
+stack_name = "zalt-auth-platform"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+confirm_changeset = true
+resolve_s3 = true
+region = "eu-central-1"
+image_repositories = []
+
+[default.package.parameters]
+resolve_s3 = true
+
+[default.sync.parameters]
+watch = true
+
+[default.local_start_api.parameters]
+warm_containers = "EAGER"
+
+[default.local_start_lambda.parameters]
+warm_containers = "EAGER"
+
+# Production environment configuration
+[production]
+[production.deploy.parameters]
+stack_name = "zalt-auth-platform-prod"
+s3_prefix = "zalt-auth-platform-prod"
+region = "eu-central-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+parameter_overrides = [
+    "Environment=production",
+    "DomainName=api.zalt.io"
+]
+tags = "Application=\"zalt-auth-platform\" Environment=\"production\""
+
+# Staging environment configuration
+[staging]
+[staging.deploy.parameters]
+stack_name = "zalt-auth-platform-staging"
+s3_prefix = "zalt-auth-platform-staging"
+region = "eu-central-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+parameter_overrides = [
+    "Environment=staging",
+    "DomainName=api-staging.zalt.io"
+]
+tags = "Application=\"zalt-auth-platform\" Environment=\"staging\""
+
+# Development environment configuration
+[development]
+[development.deploy.parameters]
+stack_name = "zalt-auth-platform-dev"
+s3_prefix = "zalt-auth-platform-dev"
+region = "eu-central-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM CAPABILITY_AUTO_EXPAND"
+parameter_overrides = [
+    "Environment=development",
+    "DomainName=api-dev.zalt.io"
+]
+tags = "Application=\"zalt-auth-platform\" Environment=\"development\""

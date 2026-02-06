@@ -1,0 +1,4 @@
+include README.md
+include LICENSE
+include hsd_auth/py.typed
+recursive-include hsd_auth *.py *.pyi

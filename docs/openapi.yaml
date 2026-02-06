@@ -1,0 +1,616 @@
+openapi: 3.0.3
+info:
+  title: Zalt.io Authentication API
+  description: |
+    Enterprise-grade Authentication as a Service.
+    
+    ## Authentication
+    Most endpoints require a Bearer token in the Authorization header:
+    ```
+    Authorization: Bearer <access_token>
+    ```
+    
+    ## Rate Limits
+    - Login: 5/15min/IP
+    - Register: 3/hour/IP
+    - General: 100/min/user
+  version: 1.0.0
+  contact:
+    email: support@zalt.io
+    url: https://zalt.io
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.zalt.io
+    description: Production
+
+tags:
+  - name: Authentication
+    description: Core auth operations
+  - name: MFA
+    description: Multi-factor authentication
+  - name: WebAuthn
+    description: Passkey/FIDO2 authentication
+  - name: Password
+    description: Password management
+  - name: User
+    description: User profile operations
+
+paths:
+  /register:
+    post:
+      tags: [Authentication]
+      summary: Register new user
+      operationId: register
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '201':
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RegisterResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          description: Email already exists
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /login:
+    post:
+      tags: [Authentication]
+      summary: Authenticate user
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Login successful or MFA required
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/LoginResponse'
+                  - $ref: '#/components/schemas/MFARequiredResponse'
+        '401':
+          description: Invalid credentials
+        '403':
+          description: Account locked
+        '429':
+          $ref: '#/components/responses/RateLimited'
+
+  /refresh:
+    post:
+      tags: [Authentication]
+      summary: Refresh access token
+      operationId: refreshToken
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token:
+                  type: string
+      responses:
+        '200':
+          description: Tokens refreshed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResponse'
+        '401':
+          description: Invalid refresh token
+
+  /logout:
+    post:
+      tags: [Authentication]
+      summary: Logout user
+      operationId: logout
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Logged out successfully
+
+  /me:
+    get:
+      tags: [User]
+      summary: Get current user
+      operationId: getCurrentUser
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserResponse'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /v1/auth/mfa/setup:
+    post:
+      tags: [MFA]
+      summary: Initialize MFA setup
+      operationId: setupMFA
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: MFA setup data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MFASetupResponse'
+
+  /v1/auth/mfa/verify:
+    post:
+      tags: [MFA]
+      summary: Verify and enable MFA
+      operationId: verifyMFASetup
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, secret]
+              properties:
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+                secret:
+                  type: string
+      responses:
+        '200':
+          description: MFA enabled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MFAVerifyResponse'
+
+  /v1/auth/mfa/login/verify:
+    post:
+      tags: [MFA]
+      summary: Complete MFA login
+      operationId: verifyMFALogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_session_id, code]
+              properties:
+                mfa_session_id:
+                  type: string
+                  format: uuid
+                code:
+                  type: string
+                  pattern: '^\d{6}$'
+      responses:
+        '200':
+          description: Login complete
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /v1/auth/mfa/disable:
+    post:
+      tags: [MFA]
+      summary: Disable MFA
+      operationId: disableMFA
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code:
+                  type: string
+      responses:
+        '200':
+          description: MFA disabled
+
+  /v1/auth/webauthn/register/options:
+    post:
+      tags: [WebAuthn]
+      summary: Get WebAuthn registration options
+      operationId: getWebAuthnRegisterOptions
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Registration options
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebAuthnRegisterOptions'
+
+  /v1/auth/webauthn/register:
+    post:
+      tags: [WebAuthn]
+      summary: Register WebAuthn credential
+      operationId: registerWebAuthn
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnRegisterRequest'
+      responses:
+        '201':
+          description: Credential registered
+
+  /v1/auth/webauthn/authenticate/options:
+    post:
+      tags: [WebAuthn]
+      summary: Get WebAuthn authentication options
+      operationId: getWebAuthnAuthOptions
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [realm_id, email]
+              properties:
+                realm_id:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Authentication options
+
+  /v1/auth/webauthn/authenticate:
+    post:
+      tags: [WebAuthn]
+      summary: Authenticate with WebAuthn
+      operationId: authenticateWebAuthn
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebAuthnAuthRequest'
+      responses:
+        '200':
+          description: Authentication successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+
+  /v1/auth/webauthn/credentials:
+    get:
+      tags: [WebAuthn]
+      summary: List WebAuthn credentials
+      operationId: listWebAuthnCredentials
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Credential list
+
+  /v1/auth/webauthn/credentials/{credentialId}:
+    delete:
+      tags: [WebAuthn]
+      summary: Delete WebAuthn credential
+      operationId: deleteWebAuthnCredential
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: credentialId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Credential deleted
+
+  /v1/auth/password-reset/request:
+    post:
+      tags: [Password]
+      summary: Request password reset
+      operationId: requestPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [realm_id, email]
+              properties:
+                realm_id:
+                  type: string
+                email:
+                  type: string
+                  format: email
+      responses:
+        '200':
+          description: Reset email sent (if account exists)
+
+  /v1/auth/password-reset/confirm:
+    post:
+      tags: [Password]
+      summary: Confirm password reset
+      operationId: confirmPasswordReset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, new_password]
+              properties:
+                token:
+                  type: string
+                new_password:
+                  type: string
+                  minLength: 12
+      responses:
+        '200':
+          description: Password reset successful
+
+  /v1/auth/verify-email/send:
+    post:
+      tags: [User]
+      summary: Send verification email
+      operationId: sendVerificationEmail
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Email sent
+
+  /v1/auth/verify-email/confirm:
+    post:
+      tags: [User]
+      summary: Verify email address
+      operationId: verifyEmail
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token]
+              properties:
+                token:
+                  type: string
+      responses:
+        '200':
+          description: Email verified
+
+  /health/ready:
+    get:
+      tags: [System]
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service healthy
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    RegisterRequest:
+      type: object
+      required: [realm_id, email, password]
+      properties:
+        realm_id:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 12
+        profile:
+          $ref: '#/components/schemas/UserProfile'
+
+    RegisterResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+
+    LoginRequest:
+      type: object
+      required: [realm_id, email, password]
+      properties:
+        realm_id:
+          type: string
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+
+    LoginResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        user:
+          $ref: '#/components/schemas/User'
+        tokens:
+          $ref: '#/components/schemas/TokenResponse'
+
+    MFARequiredResponse:
+      type: object
+      properties:
+        mfa_required:
+          type: boolean
+          enum: [true]
+        mfa_session_id:
+          type: string
+          format: uuid
+        mfa_methods:
+          type: array
+          items:
+            type: string
+            enum: [totp, webauthn]
+        expires_in:
+          type: integer
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+        refresh_token:
+          type: string
+        expires_in:
+          type: integer
+
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        email:
+          type: string
+          format: email
+        email_verified:
+          type: boolean
+        profile:
+          $ref: '#/components/schemas/UserProfile'
+        mfa_enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    UserProfile:
+      type: object
+      properties:
+        first_name:
+          type: string
+        last_name:
+          type: string
+        metadata:
+          type: object
+
+    UserResponse:
+      type: object
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+
+    MFASetupResponse:
+      type: object
+      properties:
+        secret:
+          type: string
+        otpauth_url:
+          type: string
+        message:
+          type: string
+
+    MFAVerifyResponse:
+      type: object
+      properties:
+        message:
+          type: string
+        backup_codes:
+          type: array
+          items:
+            type: string
+
+    WebAuthnRegisterOptions:
+      type: object
+      properties:
+        options:
+          type: object
+        expires_in:
+          type: integer
+
+    WebAuthnRegisterRequest:
+      type: object
+      required: [credential]
+      properties:
+        credential:
+          type: object
+        name:
+          type: string
+
+    WebAuthnAuthRequest:
+      type: object
+      required: [realm_id, email, credential]
+      properties:
+        realm_id:
+          type: string
+        email:
+          type: string
+          format: email
+        credential:
+          type: object
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            request_id:
+              type: string
+
+  responses:
+    BadRequest:
+      description: Invalid request
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Unauthorized:
+      description: Authentication required
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    RateLimited:
+      description: Too many requests
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'

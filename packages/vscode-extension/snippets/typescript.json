@@ -1,0 +1,79 @@
+{
+  "Zalt Client": {
+    "prefix": "zalt-client",
+    "body": [
+      "import { ZaltClient } from '@zalt/core';",
+      "",
+      "const zalt = new ZaltClient({",
+      "  realmId: '${1:your-realm-id}',",
+      "  apiUrl: '${2:https://api.zalt.io}',",
+      "});"
+    ],
+    "description": "Create a Zalt client instance"
+  },
+  "Zalt Login": {
+    "prefix": "zalt-login",
+    "body": [
+      "const result = await zalt.login(${1:email}, ${2:password});",
+      "",
+      "if (result.mfaRequired) {",
+      "  // Handle MFA verification",
+      "  await zalt.mfa.verify(result.sessionId, ${3:code});",
+      "}"
+    ],
+    "description": "Zalt login with MFA handling"
+  },
+  "Zalt Register": {
+    "prefix": "zalt-register",
+    "body": [
+      "const user = await zalt.register(${1:email}, ${2:password}, {",
+      "  firstName: ${3:firstName},",
+      "  lastName: ${4:lastName},",
+      "});"
+    ],
+    "description": "Zalt user registration"
+  },
+  "Zalt MFA Setup": {
+    "prefix": "zalt-mfa-setup",
+    "body": [
+      "// Setup TOTP MFA",
+      "const { qrCode, secret } = await zalt.mfa.setup('totp');",
+      "",
+      "// Verify the code",
+      "await zalt.mfa.verify(${1:code});"
+    ],
+    "description": "Setup TOTP MFA"
+  },
+  "Zalt WebAuthn": {
+    "prefix": "zalt-webauthn",
+    "body": [
+      "// Check WebAuthn support",
+      "const supported = await zalt.webauthn.isSupported();",
+      "",
+      "if (supported) {",
+      "  // Register a passkey",
+      "  await zalt.webauthn.register({ name: '${1:My Device}' });",
+      "}"
+    ],
+    "description": "WebAuthn passkey registration"
+  },
+  "Zalt Error Handling": {
+    "prefix": "zalt-error",
+    "body": [
+      "import { ZaltError, AuthenticationError, RateLimitError } from '@zalt/core';",
+      "",
+      "try {",
+      "  await zalt.login(email, password);",
+      "} catch (error) {",
+      "  if (error instanceof RateLimitError) {",
+      "    console.log('Too many attempts. Retry after:', error.retryAfter);",
+      "  } else if (error instanceof AuthenticationError) {",
+      "    console.log('Invalid credentials');",
+      "  } else if (error instanceof ZaltError) {",
+      "    console.log('Auth error:', error.message);",
+      "  }",
+      "}"
+    ],
+    "description": "Zalt error handling pattern"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Zalt Security Validator",
+  "description": "Validate security best practices on code changes",
+  "version": "1",
+  "when": {
+    "type": "fileSave",
+    "pattern": "**/*.{ts,tsx}"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Security validation for Zalt code change:\n\nCHECK FOR:\n1. Token storage issues:\n   - ❌ localStorage for tokens in production\n   - ❌ Tokens in URLs or query params\n   - ✅ httpOnly cookies\n\n2. Sensitive data exposure:\n   - ❌ console.log with passwords/tokens\n   - ❌ Error messages revealing user existence\n   - ✅ Generic error messages\n\n3. MFA implementation:\n   - ⚠️ SMS MFA without risk acceptance\n   - ✅ TOTP or WebAuthn preferred\n\n4. Input validation:\n   - ❌ Missing email/password validation\n   - ❌ SQL injection vectors\n   - ✅ Proper sanitization\n\n5. Rate limiting:\n   - ❌ Auth endpoints without rate limits\n   - ✅ Proper rate limit headers\n\nIF ISSUES FOUND:\n- List each issue with line number\n- Provide fix recommendation\n- Rate severity: 🚨 Critical, ⚠️ Warning, ℹ️ Info\n\nIF NO ISSUES:\n- Respond with '✅ Security check passed'"
+  }
+}

@@ -1,0 +1,160 @@
+{
+  "test_run": {
+    "date": "2026-01-27T10:00:00Z",
+    "environment": "production",
+    "api_url": "https://api.zalt.io",
+    "realm_id": "clinisyn",
+    "region": "eu-central-1"
+  },
+  "summary": {
+    "total": 13,
+    "passed": 13,
+    "failed": 0,
+    "skipped": 0
+  },
+  "tests": [
+    {
+      "name": "Health Check",
+      "status": "PASS",
+      "duration_ms": 145,
+      "response": {
+        "status": "healthy",
+        "region": "eu-central-1",
+        "version": "1.0.0"
+      }
+    },
+    {
+      "name": "Login",
+      "status": "PASS",
+      "duration_ms": 892,
+      "details": "Argon2id verification + KMS RS256 signing successful",
+      "response": {
+        "user_id": "f11fc6f0-0f84-46ad-b43b-515d5e2e2651",
+        "email": "drsmith@clinisyn.com",
+        "tokens_received": true
+      }
+    },
+    {
+      "name": "Token Refresh",
+      "status": "PASS",
+      "duration_ms": 234,
+      "details": "30s grace period working, token rotation confirmed",
+      "response": {
+        "new_access_token": true,
+        "new_refresh_token": true
+      }
+    },
+    {
+      "name": "Logout",
+      "status": "PASS",
+      "duration_ms": 178,
+      "details": "Session terminated, tokens invalidated",
+      "response": {
+        "message": "Logged out successfully"
+      }
+    },
+    {
+      "name": "TOTP MFA Setup",
+      "status": "PASS",
+      "duration_ms": 156,
+      "details": "Secret returned for QR code generation",
+      "response": {
+        "secret_length": 32,
+        "method": "totp"
+      }
+    },
+    {
+      "name": "WebAuthn Register Options",
+      "status": "PASS",
+      "duration_ms": 189,
+      "details": "Challenge and RP configuration returned",
+      "response": {
+        "rp_id": "zalt.io",
+        "rp_name": "Zalt.io",
+        "challenge_received": true,
+        "user_verification": "preferred"
+      }
+    },
+    {
+      "name": "WebAuthn Credentials List",
+      "status": "PASS",
+      "duration_ms": 134,
+      "details": "Empty array returned (no credentials registered)",
+      "response": {
+        "credentials_count": 0
+      }
+    },
+    {
+      "name": "SMS MFA Risk Warning",
+      "status": "PASS",
+      "duration_ms": 98,
+      "details": "Turkish warning displayed for SS7 vulnerability",
+      "response": {
+        "warning_displayed": true,
+        "language": "tr",
+        "risk_acceptance_required": true
+      }
+    },
+    {
+      "name": "Password Reset Request",
+      "status": "PASS",
+      "duration_ms": 267,
+      "details": "Email sent message returned (no enumeration)",
+      "response": {
+        "message": "If the email exists, a reset link has been sent"
+      }
+    },
+    {
+      "name": "JWKS Endpoint",
+      "status": "PASS",
+      "duration_ms": 87,
+      "details": "RS256 public key available",
+      "response": {
+        "keys_count": 1,
+        "algorithm": "RS256",
+        "kid": "zalt-kms-default"
+      }
+    },
+    {
+      "name": "OpenID Configuration",
+      "status": "PASS",
+      "duration_ms": 76,
+      "details": "OIDC discovery endpoint working",
+      "response": {
+        "issuer": "https://api.zalt.io",
+        "jwks_uri": "https://api.zalt.io/.well-known/jwks.json",
+        "token_endpoint": "https://api.zalt.io/login"
+      }
+    },
+    {
+      "name": "Rate Limiting",
+      "status": "PASS",
+      "duration_ms": 1245,
+      "details": "5 failed attempts triggered RATE_LIMITED response",
+      "response": {
+        "rate_limited_after": 5,
+        "retry_after_seconds": 900
+      }
+    },
+    {
+      "name": "Email Enumeration Protection",
+      "status": "PASS",
+      "duration_ms": 456,
+      "details": "Same INVALID_CREDENTIALS for nonexistent users",
+      "response": {
+        "error_code": "INVALID_CREDENTIALS",
+        "timing_consistent": true
+      }
+    }
+  ],
+  "security_features_verified": [
+    "Argon2id password hashing (hash-wasm)",
+    "RS256 JWT signing via AWS KMS",
+    "Rate limiting (5 attempts/15min)",
+    "Token rotation on refresh",
+    "Email enumeration protection",
+    "WebAuthn/Passkey support",
+    "TOTP MFA support",
+    "SMS MFA with risk warning"
+  ]
+}

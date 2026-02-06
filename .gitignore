@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+.venv/
+__pycache__/
+
+# Build outputs
+dist/
+.aws-sam/build/
+*.zip
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test
+.coverage
+.hypothesis/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Cache
+.next/
+.cache/

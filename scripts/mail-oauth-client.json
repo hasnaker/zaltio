@@ -1,0 +1,44 @@
+{
+  "realmId": {"S": "mail-hsdcore-prod"},
+  "name": {"S": "Mail Kiro Production"},
+  "displayName": {"S": "Mail Kiro"},
+  "description": {"S": "HSD Mail System - mail.hsdcore.com"},
+  "createdAt": {"S": "2026-01-26T03:30:00Z"},
+  "branding": {
+    "M": {
+      "display_name": {"S": "Mail Kiro"},
+      "app_url": {"S": "https://mail.hsdcore.com"},
+      "support_email": {"S": "support@hsdcore.com"},
+      "email_from_name": {"S": "Mail Kiro"}
+    }
+  },
+  "settings": {
+    "M": {
+      "callbackUrls": {
+        "L": [
+          {"S": "https://mail.hsdcore.com/api/auth/callback/zalt"},
+          {"S": "http://localhost:3000/api/auth/callback/zalt"}
+        ]
+      },
+      "allowedOrigins": {
+        "L": [
+          {"S": "https://mail.hsdcore.com"},
+          {"S": "http://localhost:3000"}
+        ]
+      },
+      "dataResidency": {"S": "EU"},
+      "maxSessions": {"N": "5"},
+      "mfaPolicy": {"S": "optional"},
+      "passwordPolicy": {
+        "M": {
+          "requireNumbers": {"BOOL": true},
+          "requireUppercase": {"BOOL": true},
+          "requireLowercase": {"BOOL": true},
+          "minLength": {"N": "8"}
+        }
+      }
+    }
+  },
+  "clientId": {"S": "mail-hsdcore-prod"},
+  "clientSecret": {"S": "a8f3e2d1c4b5a6978d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b2c"}
+}

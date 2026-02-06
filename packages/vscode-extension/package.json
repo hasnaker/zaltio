@@ -1,0 +1,118 @@
+{
+  "name": "zalt-auth",
+  "displayName": "Zalt Authentication",
+  "description": "Zalt.io authentication SDK integration for VS Code and Cursor",
+  "version": "1.0.0",
+  "publisher": "zalt-io",
+  "icon": "images/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zalt-io/zalt-sdk"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Snippets",
+    "Other"
+  ],
+  "keywords": [
+    "authentication",
+    "auth",
+    "zalt",
+    "security",
+    "mfa",
+    "webauthn"
+  ],
+  "activationEvents": [
+    "onLanguage:typescript",
+    "onLanguage:typescriptreact",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zalt.addAuth",
+        "title": "Zalt: Add Authentication"
+      },
+      {
+        "command": "zalt.setupMFA",
+        "title": "Zalt: Add MFA Setup"
+      },
+      {
+        "command": "zalt.addProtectedRoute",
+        "title": "Zalt: Add Protected Route"
+      },
+      {
+        "command": "zalt.checkSecurity",
+        "title": "Zalt: Security Check"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "typescript",
+        "path": "./snippets/typescript.json"
+      },
+      {
+        "language": "typescriptreact",
+        "path": "./snippets/typescriptreact.json"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zalt-explorer",
+          "title": "Zalt Auth",
+          "icon": "images/zalt-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "zalt-explorer": [
+        {
+          "id": "zalt-status",
+          "name": "Status"
+        },
+        {
+          "id": "zalt-realms",
+          "name": "Realms"
+        },
+        {
+          "id": "zalt-docs",
+          "name": "Documentation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Zalt Authentication",
+      "properties": {
+        "zalt.apiUrl": {
+          "type": "string",
+          "default": "https://api.zalt.io",
+          "description": "Zalt API URL"
+        },
+        "zalt.adminKey": {
+          "type": "string",
+          "default": "",
+          "description": "Zalt Admin API Key (stored securely)"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^2.22.0",
+    "typescript": "^5.3.0"
+  }
+}

@@ -1,0 +1,379 @@
+Metadata-Version: 2.4
+Name: zalt-auth
+Version: 1.0.0
+Summary: Python SDK for Zalt.io Authentication Platform - Enterprise Auth-as-a-Service
+Home-page: https://github.com/zalt/zalt-auth-python-sdk
+Author: HSD Team
+Author-email: "Zalt.io Team" <dev@zalt.io>
+License: MIT
+Project-URL: Documentation, https://docs.zalt.io/sdk/python
+Project-URL: Repository, https://github.com/zalt-io/zalt-auth-python
+Project-URL: Issues, https://github.com/zalt-io/zalt-auth-python/issues
+Project-URL: Changelog, https://github.com/zalt-io/zalt-auth-python/blob/main/CHANGELOG.md
+Keywords: authentication,auth,zalt,sdk,api,jwt,oauth,mfa,totp,webauthn,passkeys,hipaa,gdpr,enterprise
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Framework :: FastAPI
+Classifier: Framework :: Flask
+Classifier: Typing :: Typed
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: httpx>=0.24.0
+Provides-Extra: fastapi
+Requires-Dist: fastapi>=0.100.0; extra == "fastapi"
+Provides-Extra: flask
+Requires-Dist: flask>=2.0.0; extra == "flask"
+Provides-Extra: all
+Requires-Dist: fastapi>=0.100.0; extra == "all"
+Requires-Dist: flask>=2.0.0; extra == "all"
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.21.0; extra == "dev"
+Requires-Dist: hypothesis>=6.0.0; extra == "dev"
+Requires-Dist: respx>=0.20.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: isort>=5.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+Dynamic: author
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-python
+
+# Zalt Auth Python SDK
+
+Official Python SDK for [Zalt.io](https://zalt.io) - Enterprise Authentication as a Service.
+
+[![PyPI version](https://badge.fury.io/py/zalt-auth.svg)](https://pypi.org/project/zalt-auth/)
+[![Python versions](https://img.shields.io/pypi/pyversions/zalt-auth.svg)](https://pypi.org/project/zalt-auth/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+## Features
+
+- 🔐 **Enterprise Security**: RS256 JWT, Argon2id passwords, HIPAA/GDPR compliant
+- 🔑 **MFA Support**: TOTP, WebAuthn/Passkeys (phishing-proof)
+- ⚡ **Async Support**: Full async/await support for modern Python apps
+- 🚀 **Framework Integrations**: FastAPI and Flask out of the box
+- 🔄 **Auto Token Refresh**: Automatic token management with retry logic
+- 📦 **Type Safe**: Full type hints with py.typed marker
+
+## Installation
+
+```bash
+# Basic installation
+pip install zalt-auth
+
+# With FastAPI support
+pip install zalt-auth[fastapi]
+
+# With Flask support
+pip install zalt-auth[flask]
+
+# All integrations
+pip install zalt-auth[all]
+```
+
+## Quick Start
+
+### Basic Usage (Sync)
+
+```python
+from zalt_auth import ZaltClient, ZaltConfig, LoginCredentials, RegisterData
+
+# Initialize client
+client = ZaltClient(ZaltConfig(
+    publishable_key="pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    realm_id="your-realm-id",  # Optional
+))
+
+# Register a new user
+result = client.register(RegisterData(
+    email="user@example.com",
+    password="SecurePassword123!",
+))
+print(f"Welcome, {result.user.email}!")
+
+# Login
+try:
+    result = client.login(LoginCredentials(
+        email="user@example.com",
+        password="SecurePassword123!",
+    ))
+    print(f"Logged in: {result.user.id}")
+except MFARequiredError as e:
+    # Handle MFA verification
+    mfa_result = client.mfa.verify(code="123456", session_id=e.mfa_session_id)
+    print(f"MFA verified: {mfa_result.user.id}")
+
+# Get current user
+user = client.fetch_user()
+print(f"User: {user.email}")
+
+# Logout
+client.logout()
+```
+
+### Async Usage
+
+```python
+import asyncio
+from zalt_auth import ZaltAsyncClient, ZaltConfig, LoginCredentials
+
+async def main():
+    async with ZaltAsyncClient(ZaltConfig(
+        publishable_key="pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    )) as client:
+        # Login
+        result = await client.login(LoginCredentials(
+            email="user@example.com",
+            password="SecurePassword123!",
+        ))
+        
+        # Fetch user
+        user = await client.fetch_user()
+        print(f"User: {user.email}")
+        
+        # Logout
+        await client.logout()
+
+asyncio.run(main())
+```
+
+## Framework Integrations
+
+### FastAPI
+
+```python
+from fastapi import FastAPI, Depends
+from zalt_auth.integrations.fastapi import (
+    ZaltFastAPI,
+    get_current_user,
+    require_permissions,
+)
+from zalt_auth import User
+
+app = FastAPI()
+
+# Initialize Zalt
+zalt = ZaltFastAPI(
+    app,
+    publishable_key="pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+)
+
+@app.get("/me")
+async def get_me(user: User = Depends(get_current_user)):
+    return {"id": user.id, "email": user.email}
+
+@app.get("/admin")
+async def admin_only(user: User = Depends(require_permissions(["admin:read"]))):
+    return {"admin": True, "user_id": user.id}
+```
+
+### Flask
+
+```python
+from flask import Flask, jsonify
+from zalt_auth.integrations.flask import (
+    ZaltFlask,
+    login_required,
+    permission_required,
+    current_user,
+)
+
+app = Flask(__name__)
+
+# Initialize Zalt
+zalt = ZaltFlask(
+    app,
+    publishable_key="pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+)
+
+@app.route("/me")
+@login_required
+def get_me():
+    return jsonify({
+        "id": current_user.id,
+        "email": current_user.email,
+    })
+
+@app.route("/admin")
+@permission_required(["admin:read"])
+def admin_only():
+    return jsonify({"admin": True})
+```
+
+## MFA (Multi-Factor Authentication)
+
+### TOTP Setup
+
+```python
+# Setup TOTP
+setup = client.mfa.setup(method="totp")
+print(f"Secret: {setup.secret}")
+print(f"QR Code: {setup.qr_code}")
+print(f"Backup Codes: {setup.backup_codes}")
+
+# Verify TOTP code
+result = client.mfa.verify(code="123456")
+
+# Get MFA status
+status = client.mfa.get_status()
+print(f"MFA enabled: {status.enabled}")
+print(f"Methods: {status.methods}")
+
+# Disable MFA
+client.mfa.disable(code="123456")
+```
+
+### SMS MFA (⚠️ Security Warning)
+
+SMS MFA is available but **not recommended** due to SS7 vulnerabilities and SIM swapping attacks. Use TOTP or WebAuthn instead.
+
+```python
+# SMS MFA requires explicit risk acceptance
+client.sms.setup(
+    phone_number="+1234567890",
+    accept_risk=True,  # Required - acknowledges SS7 vulnerabilities
+)
+
+# Verify SMS code
+result = client.sms.verify(code="123456")
+```
+
+## Error Handling
+
+```python
+from zalt_auth import (
+    ZaltError,
+    AuthenticationError,
+    ValidationError,
+    RateLimitError,
+    MFARequiredError,
+)
+
+try:
+    result = client.login(credentials)
+except MFARequiredError as e:
+    # MFA verification needed
+    print(f"MFA required. Session: {e.mfa_session_id}")
+    print(f"Available methods: {e.mfa_methods}")
+except AuthenticationError as e:
+    # Invalid credentials
+    print(f"Auth failed: {e.message}")
+except RateLimitError as e:
+    # Too many requests
+    print(f"Rate limited. Retry after: {e.retry_after} seconds")
+except ValidationError as e:
+    # Invalid input
+    print(f"Validation error: {e.message}")
+except ZaltError as e:
+    # Other Zalt errors
+    print(f"Error: {e.code} - {e.message}")
+```
+
+## Token Storage
+
+### Memory Storage (Default)
+
+```python
+from zalt_auth import ZaltClient, ZaltConfig
+
+# Uses in-memory storage (tokens lost on restart)
+client = ZaltClient(ZaltConfig(
+    publishable_key="pk_live_xxx",
+))
+```
+
+### File Storage (Persistent)
+
+```python
+from zalt_auth import ZaltClient, ZaltConfig
+from zalt_auth.storage import FileStorage
+
+# Persists tokens to file
+client = ZaltClient(ZaltConfig(
+    publishable_key="pk_live_xxx",
+    storage=FileStorage("~/.myapp/tokens.json"),
+))
+```
+
+### Custom Storage
+
+```python
+from zalt_auth import TokenStorage
+
+class RedisStorage(TokenStorage):
+    def __init__(self, redis_client):
+        self.redis = redis_client
+    
+    def get_access_token(self) -> str | None:
+        return self.redis.get("zalt:access_token")
+    
+    def get_refresh_token(self) -> str | None:
+        return self.redis.get("zalt:refresh_token")
+    
+    def set_tokens(self, access_token: str, refresh_token: str, expires_in: int) -> None:
+        self.redis.setex("zalt:access_token", expires_in, access_token)
+        self.redis.set("zalt:refresh_token", refresh_token)
+    
+    def clear_tokens(self) -> None:
+        self.redis.delete("zalt:access_token", "zalt:refresh_token")
+```
+
+## Configuration
+
+```python
+from zalt_auth import ZaltConfig
+
+config = ZaltConfig(
+    # Required
+    publishable_key="pk_live_xxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    
+    # Optional
+    realm_id="your-realm-id",           # For multi-tenant apps
+    base_url="https://api.zalt.io",     # Custom API URL
+    timeout=30.0,                        # Request timeout (seconds)
+    retry_attempts=3,                    # Number of retries
+    retry_delay=1.0,                     # Delay between retries
+    auto_refresh=True,                   # Auto-refresh tokens
+    refresh_threshold=60,                # Refresh when < 60s remaining
+    debug=False,                         # Enable debug logging
+)
+```
+
+## Security Best Practices
+
+1. **Use TOTP or WebAuthn** for MFA (avoid SMS)
+2. **Store tokens securely** - use httpOnly cookies in web apps
+3. **Enable auto-refresh** to minimize token exposure
+4. **Use HTTPS** in production
+5. **Validate all inputs** before sending to API
+6. **Handle errors gracefully** without exposing sensitive info
+
+## API Reference
+
+See the [full API documentation](https://docs.zalt.io/sdk/python) for detailed information.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
+
+## Support
+
+- 📚 [Documentation](https://docs.zalt.io)
+- 💬 [Discord Community](https://discord.gg/zalt)
+- 🐛 [Issue Tracker](https://github.com/zalt-io/zalt-auth-python/issues)
+- 📧 [Email Support](mailto:support@zalt.io)

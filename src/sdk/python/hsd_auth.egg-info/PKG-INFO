@@ -1,0 +1,283 @@
+Metadata-Version: 2.4
+Name: hsd-auth
+Version: 0.1.0
+Summary: Python SDK for HSD Auth Platform - Authentication as a Service
+Home-page: https://github.com/hsd/hsd-auth-python-sdk
+Author: HSD Team
+Author-email: HSD Team <dev@hsdcore.com>
+License: MIT
+Project-URL: Documentation, https://docs.auth.hsdcore.com/sdk/python
+Project-URL: Repository, https://github.com/hsd/hsd-auth-python-sdk
+Project-URL: Issues, https://github.com/hsd/hsd-auth-python-sdk/issues
+Keywords: authentication,auth,hsd,sdk,api,jwt,oauth
+Classifier: Development Status :: 4 - Beta
+Classifier: Intended Audience :: Developers
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: OS Independent
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.8
+Classifier: Programming Language :: Python :: 3.9
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Internet :: WWW/HTTP
+Classifier: Topic :: Security
+Classifier: Topic :: Software Development :: Libraries :: Python Modules
+Classifier: Typing :: Typed
+Requires-Python: >=3.8
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: requests>=2.25.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: pytest-cov>=4.0.0; extra == "dev"
+Requires-Dist: hypothesis>=6.0.0; extra == "dev"
+Requires-Dist: responses>=0.23.0; extra == "dev"
+Requires-Dist: mypy>=1.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: isort>=5.0.0; extra == "dev"
+Requires-Dist: flake8>=6.0.0; extra == "dev"
+Dynamic: author
+Dynamic: home-page
+Dynamic: license-file
+Dynamic: requires-python
+
+# HSD Auth Python SDK
+
+Official Python SDK for the HSD Auth Platform - Authentication as a Service.
+
+## Installation
+
+```bash
+pip install hsd-auth
+```
+
+## Quick Start
+
+```python
+from hsd_auth import HSDAuthClient, HSDAuthConfig, LoginCredentials, RegisterData
+
+# Initialize the client
+config = HSDAuthConfig(
+    base_url="https://api.auth.hsdcore.com",
+    realm_id="your-realm-id"
+)
+client = HSDAuthClient(config)
+
+# Register a new user
+result = client.register(RegisterData(
+    email="user@example.com",
+    password="secure-password"
+))
+print(f"Registered user: {result.user.email}")
+
+# Login
+result = client.login(LoginCredentials(
+    email="user@example.com",
+    password="secure-password"
+))
+print(f"Logged in as: {result.user.email}")
+
+# Get current user
+user = client.get_current_user()
+if user:
+    print(f"Current user: {user.email}")
+
+# Logout
+client.logout()
+```
+
+## Features
+
+- **Automatic Token Refresh**: Tokens are automatically refreshed before expiration
+- **Retry Mechanism**: Failed requests are automatically retried with exponential backoff
+- **Type Hints**: Full type annotations for IDE support
+- **Consistent API**: API matches the TypeScript SDK for cross-platform consistency
+- **Error Handling**: Comprehensive error classes for different failure scenarios
+
+## Configuration Options
+
+```python
+from hsd_auth import HSDAuthConfig, MemoryStorage
+
+config = HSDAuthConfig(
+    base_url="https://api.auth.hsdcore.com",  # Required: API base URL
+    realm_id="your-realm-id",                  # Required: Realm ID
+    timeout=10.0,                              # Request timeout in seconds (default: 10)
+    retry_attempts=3,                          # Number of retry attempts (default: 3)
+    retry_delay=1.0,                           # Delay between retries in seconds (default: 1)
+    auto_refresh=True,                         # Enable automatic token refresh (default: True)
+    refresh_threshold=300,                     # Refresh threshold in seconds (default: 300)
+    storage=MemoryStorage(),                   # Custom token storage (default: MemoryStorage)
+)
+```
+
+## API Reference
+
+### Authentication Methods
+
+#### `register(data: RegisterData) -> AuthResult`
+Register a new user.
+
+```python
+from hsd_auth import RegisterData, UserProfile
+
+result = client.register(RegisterData(
+    email="user@example.com",
+    password="secure-password",
+    profile=UserProfile(
+        first_name="John",
+        last_name="Doe"
+    )
+))
+```
+
+#### `login(credentials: LoginCredentials) -> AuthResult`
+Login with email and password.
+
+```python
+from hsd_auth import LoginCredentials
+
+result = client.login(LoginCredentials(
+    email="user@example.com",
+    password="secure-password"
+))
+```
+
+#### `logout() -> None`
+Logout the current user.
+
+```python
+client.logout()
+```
+
+#### `refresh_token() -> TokenResult`
+Manually refresh the access token.
+
+```python
+result = client.refresh_token()
+print(f"New token expires in: {result.expires_in} seconds")
+```
+
+### User Methods
+
+#### `get_current_user() -> Optional[User]`
+Get the current authenticated user.
+
+```python
+user = client.get_current_user()
+if user:
+    print(f"Email: {user.email}")
+    print(f"Status: {user.status}")
+```
+
+#### `update_profile(data: ProfileUpdateData) -> User`
+Update the user's profile.
+
+```python
+from hsd_auth import ProfileUpdateData
+
+user = client.update_profile(ProfileUpdateData(
+    first_name="Jane",
+    last_name="Smith"
+))
+```
+
+#### `change_password(data: PasswordChangeData) -> None`
+Change the user's password.
+
+```python
+from hsd_auth import PasswordChangeData
+
+client.change_password(PasswordChangeData(
+    current_password="old-password",
+    new_password="new-secure-password"
+))
+```
+
+### Utility Methods
+
+#### `is_authenticated() -> bool`
+Check if the user is authenticated.
+
+```python
+if client.is_authenticated():
+    print("User is logged in")
+```
+
+#### `get_access_token() -> Optional[str]`
+Get the current access token.
+
+```python
+token = client.get_access_token()
+```
+
+## Error Handling
+
+The SDK provides specific error classes for different failure scenarios:
+
+```python
+from hsd_auth import (
+    HSDAuthError,
+    AuthenticationError,
+    AuthorizationError,
+    ValidationError,
+    RateLimitError,
+    NetworkError,
+    TokenRefreshError,
+    ConfigurationError,
+)
+
+try:
+    client.login(LoginCredentials(
+        email="user@example.com",
+        password="wrong-password"
+    ))
+except AuthenticationError as e:
+    print(f"Authentication failed: {e.message}")
+    print(f"Error code: {e.code}")
+except RateLimitError as e:
+    print(f"Rate limited. Retry after: {e.retry_after} seconds")
+except NetworkError as e:
+    print(f"Network error: {e.message}")
+except HSDAuthError as e:
+    print(f"Auth error: {e.message}")
+```
+
+## Custom Token Storage
+
+Implement the `TokenStorage` protocol for custom storage:
+
+```python
+from typing import Optional
+
+class RedisStorage:
+    def __init__(self, redis_client, prefix="hsd_auth_"):
+        self.redis = redis_client
+        self.prefix = prefix
+    
+    def get_access_token(self) -> Optional[str]:
+        return self.redis.get(f"{self.prefix}access_token")
+    
+    def get_refresh_token(self) -> Optional[str]:
+        return self.redis.get(f"{self.prefix}refresh_token")
+    
+    def set_tokens(self, access_token: str, refresh_token: str, expires_in: int) -> None:
+        self.redis.setex(f"{self.prefix}access_token", expires_in, access_token)
+        self.redis.set(f"{self.prefix}refresh_token", refresh_token)
+    
+    def clear_tokens(self) -> None:
+        self.redis.delete(f"{self.prefix}access_token")
+        self.redis.delete(f"{self.prefix}refresh_token")
+
+# Use custom storage
+config = HSDAuthConfig(
+    base_url="https://api.auth.hsdcore.com",
+    realm_id="your-realm-id",
+    storage=RedisStorage(redis_client)
+)
+```
+
+## License
+
+MIT License - see LICENSE file for details.

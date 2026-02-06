@@ -1,0 +1,66 @@
+{
+  "name": "@zalt.io/react",
+  "version": "1.0.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Zalt.io Authentication SDK - React hooks and components",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --sourcemap --external react",
+    "dev": "tsup src/index.ts --format cjs,esm --dts --watch --external react",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts,.tsx",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "zalt",
+    "authentication",
+    "auth",
+    "react",
+    "hooks",
+    "components",
+    "typescript"
+  ],
+  "author": "Zalt.io",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zalt-io/zalt-sdk"
+  },
+  "homepage": "https://zalt.io",
+  "dependencies": {
+    "@zalt.io/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^14.0.0",
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "fast-check": "^3.15.0",
+    "jsdom": "^27.4.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-dom": ">=18.0.0"
+  },
+  "sideEffects": false
+}

@@ -1,0 +1,3817 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Zalt Auth Platform - Authentication-as-a-Service
+  DynamoDB tables managed externally (zalt-users, zalt-sessions, zalt-realms)
+
+Globals:
+  Function:
+    Runtime: nodejs20.x
+    Timeout: 30
+    MemorySize: 256
+    Environment:
+      Variables:
+        NODE_ENV: production
+        AWS_NODEJS_CONNECTION_REUSE_ENABLED: '1'
+        DYNAMODB_USERS_TABLE: zalt-users
+        DYNAMODB_REALMS_TABLE: zalt-realms
+        DYNAMODB_SESSIONS_TABLE: zalt-sessions
+        ORGANIZATIONS_TABLE: zalt-organizations
+        MEMBERSHIPS_TABLE: zalt-memberships
+        ROLES_TABLE: zalt-roles
+        # OAuth Credentials - Stored in AWS Secrets Manager
+        # NEVER store secrets in template.yaml!
+        OAUTH_SECRETS_ARN: 'arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/oauth-credentials'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+  DomainName:
+    Type: String
+    Default: api.zalt.io
+
+  BudgetAlertEmail:
+    Type: String
+    Default: alerts@zalt.io
+
+Resources:
+  # ============================================
+  # Lambda Functions (esbuild bundled for minimal size)
+  # ============================================
+  RegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-register
+      Handler: register-handler.handler
+      CodeUri: src/handlers/
+      Description: User registration handler
+      MemorySize: 512
+      Timeout: 30
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues and adds cost
+      # Can be re-enabled after stable deployment via AWS Console if needed
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        Register:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /register
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - register-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  LoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-login
+      Handler: login-handler.handler
+      CodeUri: src/handlers/
+      Description: User authentication handler
+      MemorySize: 512
+      Timeout: 30
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        Login:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /login
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - login-handler.ts
+        External:
+          - "@aws-sdk/*"
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # Admin Realm Management (for Dashboard)
+  AdminRealmFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-admin-realm
+      Handler: admin-realm-handler.handler
+      CodeUri: src/handlers/
+      Description: Admin realm management for dashboard
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          ZALT_ADMIN_KEY: zalt-admin-2026-secure-key
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms/index/*
+      Events:
+        CreateRealm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /admin/realms
+            Method: POST
+        ListRealms:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /admin/realms
+            Method: GET
+        GetRealm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /admin/realms/{realmId}
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - admin-realm-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  RefreshFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-refresh
+      Handler: refresh-handler.handler
+      CodeUri: src/handlers/
+      Description: Token refresh handler
+      MemorySize: 256
+      Timeout: 10
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        Refresh:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /refresh
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - refresh-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  LogoutFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-logout
+      Handler: logout-handler.handler
+      CodeUri: src/handlers/
+      Description: Session termination handler
+      MemorySize: 128
+      Timeout: 10
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        Logout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /logout
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - logout-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  AdminFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-admin
+      Handler: admin-handler.handler
+      CodeUri: src/handlers/
+      Description: Administrative operations handler (realm, user, session management)
+      MemorySize: 256
+      Timeout: 30
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        ListRealms:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/realms
+            Method: GET
+        CreateRealm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/realms
+            Method: POST
+        GetRealm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/realms/{id}
+            Method: GET
+        UpdateRealm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/realms/{id}
+            Method: PATCH
+        DeleteRealm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/realms/{id}
+            Method: DELETE
+        ListUsers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users
+            Method: GET
+        GetUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}
+            Method: GET
+        DeleteUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}
+            Method: DELETE
+        SuspendUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/suspend
+            Method: POST
+        ActivateUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/activate
+            Method: POST
+        UnlockUser:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/unlock
+            Method: POST
+        AdminResetPassword:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/reset-password
+            Method: POST
+        AdminResetMFA:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/mfa/reset
+            Method: POST
+        ListSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/sessions
+            Method: GET
+        RevokeSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/sessions/{id}
+            Method: DELETE
+        ListUserSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/sessions
+            Method: GET
+        RevokeUserSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/users/{id}/sessions
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - admin-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  SSOFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-sso
+      Handler: sso-handler.handler
+      CodeUri: src/handlers/
+      Description: SSO and OAuth handler
+      MemorySize: 256
+      Timeout: 30
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms/index/*
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/oauth-credentials*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        Discovery:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /.well-known/openid-configuration
+            Method: GET
+        JWKS:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /.well-known/jwks.json
+            Method: GET
+        Authorize:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /oauth/authorize
+            Method: GET
+        Token:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /oauth/token
+            Method: POST
+        UserInfo:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /oauth/userinfo
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - sso-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  HealthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-health
+      Handler: health-handler.healthHandler
+      CodeUri: src/handlers/
+      Description: Health check handler
+      MemorySize: 256
+      Timeout: 10
+      AutoPublishAlias: live
+      # Provisioned Concurrency removed - causes CloudFormation issues
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:DescribeTable
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        Health:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /health
+            Method: GET
+        Liveness:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /health/live
+            Method: GET
+        Readiness:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /health/ready
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        Format: cjs
+        OutExtension:
+          - .js=.js
+        EntryPoints:
+          - health-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # MFA Function (TOTP + Login Verify)
+  # ============================================
+  MFAFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-mfa
+      Handler: mfa-handler.handler
+      CodeUri: src/handlers/
+      Description: MFA (TOTP) handler - setup, verify, disable, login verify
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        MFASetup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/setup
+            Method: POST
+        MFAVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/verify
+            Method: POST
+        MFADisable:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/disable
+            Method: POST
+        MFALoginVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/login/verify
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - mfa-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # SMS MFA Function (with risk acceptance)
+  # ============================================
+  SMSMFAFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-sms-mfa
+      Handler: sms-mfa-handler.handler
+      CodeUri: src/handlers/
+      Description: SMS MFA handler - setup, send, verify (requires risk acceptance)
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        SMSRiskWarning:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/sms/risk-warning
+            Method: GET
+        SMSSetup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/sms/setup
+            Method: POST
+        SMSSend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/sms/send
+            Method: POST
+        SMSVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/sms/verify
+            Method: POST
+        SMSDisable:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/sms
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - sms-mfa-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # WhatsApp MFA Function (Meta Cloud API)
+  # ============================================
+  WhatsAppMFAFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-whatsapp-mfa
+      Handler: whatsapp-mfa-handler.handler
+      CodeUri: src/handlers/
+      Description: WhatsApp MFA handler - OTP with logo, verified badge, copy button
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          WHATSAPP_PHONE_NUMBER_ID: '{{resolve:secretsmanager:zalt/whatsapp:SecretString:phone_number_id}}'
+          WHATSAPP_ACCESS_TOKEN: '{{resolve:secretsmanager:zalt/whatsapp:SecretString:access_token}}'
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/whatsapp*
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        WhatsAppSetup:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/whatsapp/setup
+            Method: POST
+        WhatsAppSend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/whatsapp/send
+            Method: POST
+        WhatsAppVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/whatsapp/verify
+            Method: POST
+        WhatsAppDisable:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/mfa/whatsapp
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - whatsapp-mfa-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # Password Reset Function
+  # ============================================
+  PasswordResetFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-password-reset
+      Handler: password-reset-handler.handler
+      CodeUri: src/handlers/
+      Description: Password reset handler - request and confirm
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+                - dynamodb:DeleteItem
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        PasswordResetRequest:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/password-reset/request
+            Method: POST
+        PasswordResetConfirm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/password-reset/confirm
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - password-reset-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # Email Verification Function
+  # ============================================
+  VerifyEmailFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-verify-email
+      Handler: verify-email-handler.handler
+      CodeUri: src/handlers/
+      Description: Email verification handler - send and confirm
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Verify
+                - kms:GetPublicKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        VerifyEmailSend:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/verify-email/send
+            Method: POST
+        VerifyEmailConfirm:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/verify-email/confirm
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - verify-email-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # WebAuthn Function (Passkeys - Phishing Resistant!)
+  # ============================================
+  WebAuthnFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-webauthn
+      Handler: webauthn-handler.handler
+      CodeUri: src/handlers/
+      Description: WebAuthn/Passkey handler - register, authenticate, manage credentials
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        WebAuthnRegisterOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/webauthn/register/options
+            Method: POST
+        WebAuthnRegisterVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/webauthn/register/verify
+            Method: POST
+        WebAuthnAuthenticateOptions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/webauthn/authenticate/options
+            Method: POST
+        WebAuthnAuthenticateVerify:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/webauthn/authenticate/verify
+            Method: POST
+        WebAuthnListCredentials:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/webauthn/credentials
+            Method: GET
+        WebAuthnDeleteCredential:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/webauthn/credentials/{id}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - webauthn-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # Social Login Function (Google/Apple OAuth)
+  # ============================================
+  SocialLoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-social-login
+      Handler: social-handler.handler
+      CodeUri: src/handlers/
+      Description: Social login handler - Google OAuth, Apple Sign-In
+      MemorySize: 256
+      Timeout: 30
+      AutoPublishAlias: live
+      Environment:
+        Variables:
+          API_BASE_URL: 'https://api.zalt.io'
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        GoogleAuthorize:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/social/google/authorize
+            Method: GET
+        GoogleCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/social/google/callback
+            Method: GET
+        AppleAuthorize:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/social/apple/authorize
+            Method: GET
+        AppleCallback:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/social/apple/callback
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - social-handler.ts
+        External:
+          - "@aws-sdk/*"
+          
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # RBAC - Organization Management Function
+  # ============================================
+  OrganizationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-organization
+      Handler: organization-handler.handler
+      CodeUri: src/handlers/
+      Description: Organization management - CRUD operations
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt OrganizationsTable.Arn
+                - !Sub '${OrganizationsTable.Arn}/index/*'
+                - !GetAtt MembershipsTable.Arn
+                - !Sub '${MembershipsTable.Arn}/index/*'
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        CreateOrg:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations
+            Method: POST
+        ListOrgs:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations
+            Method: GET
+        GetOrg:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}
+            Method: GET
+        UpdateOrg:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}
+            Method: PATCH
+        DeleteOrg:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - organization-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # RBAC - Membership Management Function
+  # ============================================
+  MembershipFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-membership
+      Handler: membership-handler.handler
+      CodeUri: src/handlers/
+      Description: Membership management - invite, remove, update members
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt OrganizationsTable.Arn
+                - !Sub '${OrganizationsTable.Arn}/index/*'
+                - !GetAtt MembershipsTable.Arn
+                - !Sub '${MembershipsTable.Arn}/index/*'
+                - !GetAtt RolesTable.Arn
+                - !Sub '${RolesTable.Arn}/index/*'
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        InviteMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}/members
+            Method: POST
+        ListMembers:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}/members
+            Method: GET
+        GetMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}/members/{memberId}
+            Method: GET
+        UpdateMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}/members/{memberId}
+            Method: PATCH
+        RemoveMember:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/organizations/{id}/members/{memberId}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - membership-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # RBAC - Role Management Function
+  # ============================================
+  RoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-role
+      Handler: role-handler.handler
+      CodeUri: src/handlers/
+      Description: Role management - CRUD operations, system roles
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt RolesTable.Arn
+                - !Sub '${RolesTable.Arn}/index/*'
+                - !GetAtt MembershipsTable.Arn
+                - !Sub '${MembershipsTable.Arn}/index/*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        CreateRole:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles
+            Method: POST
+        ListRoles:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles
+            Method: GET
+        GetSystemRoles:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles/system
+            Method: GET
+        GetRole:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles/{id}
+            Method: GET
+        GetRolePermissions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles/{id}/permissions
+            Method: GET
+        UpdateRole:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles/{id}
+            Method: PATCH
+        DeleteRole:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/admin/roles/{id}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - role-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # RBAC - Organization Switch Function
+  # ============================================
+  OrgSwitchFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-org-switch
+      Handler: org-switch-handler.handler
+      CodeUri: src/handlers/
+      Description: Organization switching - list orgs, switch context, get permissions
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:Query
+              Resource:
+                - !GetAtt OrganizationsTable.Arn
+                - !Sub '${OrganizationsTable.Arn}/index/*'
+                - !GetAtt MembershipsTable.Arn
+                - !Sub '${MembershipsTable.Arn}/index/*'
+                - !GetAtt RolesTable.Arn
+                - !Sub '${RolesTable.Arn}/index/*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        ListUserOrgs:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/organizations
+            Method: GET
+        SwitchOrg:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/switch-organization
+            Method: POST
+        GetPermissions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/auth/permissions
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - org-switch-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # Game-Changer Features - Lambda Functions
+  # ============================================
+
+  # Machine Authentication (M2M) Function
+  MachineAuthFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-machine-auth
+      Handler: machine-handler.handler
+      CodeUri: src/handlers/
+      Description: Machine-to-Machine (M2M) authentication handler
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        CreateMachine:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /machines
+            Method: POST
+        GetMachineToken:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /machines/token
+            Method: POST
+        ListMachines:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /machines
+            Method: GET
+        GetMachine:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /machines/{id}
+            Method: GET
+        DeleteMachine:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /machines/{id}
+            Method: DELETE
+        RotateMachineCredentials:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /machines/{id}/rotate
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - machine-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # User API Key Function
+  APIKeyFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-api-keys
+      Handler: user-api-key.handler.handler
+      CodeUri: src/handlers/
+      Description: User-generated API key management handler
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        CreateAPIKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /api-keys
+            Method: POST
+        ListAPIKeys:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /api-keys
+            Method: GET
+        GetAPIKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /api-keys/{id}
+            Method: GET
+        RevokeAPIKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /api-keys/{id}
+            Method: DELETE
+        UpdateAPIKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /api-keys/{id}
+            Method: PATCH
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - user-api-key.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Reverification (Step-Up Authentication) Function
+  ReverificationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-reverification
+      Handler: reverification.handler.handler
+      CodeUri: src/handlers/
+      Description: Step-up authentication (reverification) handler
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Verify
+                - kms:GetPublicKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        ReverifyPassword:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /reverify/password
+            Method: POST
+        ReverifyMFA:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /reverify/mfa
+            Method: POST
+        ReverifyWebAuthn:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /reverify/webauthn
+            Method: POST
+        ReverifyStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /reverify/status
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - reverification.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Session Tasks (Post-Login Requirements) Function
+  SessionTasksFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-session-tasks
+      Handler: session-tasks.handler.handler
+      CodeUri: src/handlers/
+      Description: Session tasks (post-login requirements) handler
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Verify
+                - kms:GetPublicKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        GetSessionTasks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /session/tasks
+            Method: GET
+        CompleteSessionTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /session/tasks/{id}/complete
+            Method: POST
+        SkipSessionTask:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /session/tasks/{id}/skip
+            Method: POST
+        ForcePasswordReset:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /admin/users/{id}/force-password-reset
+            Method: POST
+        MassPasswordReset:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /admin/realm/force-password-reset
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - session-tasks.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Waitlist Mode Function
+  WaitlistFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-waitlist
+      Handler: waitlist_handler.handler
+      CodeUri: src/handlers/
+      Description: Waitlist mode handler for pre-launch signups
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        JoinWaitlist:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist
+            Method: POST
+        ListWaitlist:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist
+            Method: GET
+        GetWaitlistStats:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/stats
+            Method: GET
+        BulkApproveWaitlist:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/bulk-approve
+            Method: POST
+        GetWaitlistPosition:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/position/{id}
+            Method: GET
+        ApproveWaitlistEntry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/{id}/approve
+            Method: POST
+        RejectWaitlistEntry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/{id}/reject
+            Method: POST
+        GetWaitlistEntry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/{id}
+            Method: GET
+        DeleteWaitlistEntry:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /waitlist/{id}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - waitlist_handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # User Impersonation Function
+  ImpersonationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-impersonation
+      Handler: impersonation.handler.handler
+      CodeUri: src/handlers/
+      Description: Admin user impersonation handler
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        StartImpersonation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /admin/users/{id}/impersonate
+            Method: POST
+        EndImpersonation:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /impersonation/end
+            Method: POST
+        GetImpersonationStatus:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /impersonation/status
+            Method: GET
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - impersonation.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # Platform Customer Functions (B2B SaaS)
+  # ============================================
+  
+  # Platform Customer Registration
+  PlatformRegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-platform-register
+      Handler: index.handler
+      CodeUri: src/handlers/platform/
+      Description: Platform customer registration (B2B companies signing up for Zalt.io)
+      MemorySize: 512
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-customers
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-customers/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-platform-api-keys
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-platform-api-keys/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        PlatformRegister:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/register
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - customer-register.handler.ts
+        OutExtension:
+          - .js=.js
+        External:
+          - "@aws-sdk/*"
+        Banner:
+          - js=// Zalt.io Platform Register Handler
+
+  # Platform Customer Login
+  PlatformLoginFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-platform-login
+      Handler: customer-login.handler.handler
+      CodeUri: src/handlers/platform/
+      Description: Platform customer login (B2B companies accessing dashboard)
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        PlatformLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/login
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - customer-login.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Platform Customer Me (Profile)
+  PlatformMeFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-platform-me
+      Handler: customer-me.handler.handler
+      CodeUri: src/handlers/platform/
+      Description: Platform customer profile and settings
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        GetMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/me
+            Method: GET
+        UpdateMe:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/me
+            Method: PATCH
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - customer-me.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Platform API Keys Management
+  PlatformAPIKeysFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-platform-api-keys
+      Handler: api-keys.handler.handler
+      CodeUri: src/handlers/platform/
+      Description: Platform API keys management (create, list, revoke)
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        ListAPIKeys:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/api-keys
+            Method: GET
+        CreateAPIKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/api-keys
+            Method: POST
+        RevokeAPIKey:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/api-keys/{keyId}
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - api-keys.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Billing Integration Function
+  BillingFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-billing
+      Handler: platform/billing.handler.handler
+      CodeUri: src/handlers/
+      Description: Integrated billing (Stripe) handler
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          STRIPE_SECRET_KEY: '{{resolve:secretsmanager:zalt/stripe:SecretString:secret_key}}'
+          STRIPE_PRICE_PRO: '{{resolve:secretsmanager:zalt/stripe:SecretString:price_pro}}'
+          STRIPE_PRICE_ENTERPRISE: '{{resolve:secretsmanager:zalt/stripe:SecretString:price_enterprise}}'
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/stripe*
+      Events:
+        GetBilling:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/billing
+            Method: GET
+        CreateCheckout:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/billing/checkout
+            Method: POST
+        CreatePortal:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /platform/billing/portal
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - platform/billing.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Webhook Delivery Function (SQS-triggered)
+  WebhookDeliveryFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-webhook-delivery
+      Handler: webhook-delivery.handler.handler
+      CodeUri: src/handlers/
+      Description: Webhook delivery handler (SQS-triggered)
+      MemorySize: 256
+      Timeout: 60
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+            - Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+              Resource:
+                - !GetAtt WebhookDeliveryQueue.Arn
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt WebhookDeliveryQueue.Arn
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 5
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - webhook-delivery.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Webhook Management Function
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-webhooks
+      Handler: webhook.handler.handler
+      CodeUri: src/handlers/
+      Description: Webhook management handler
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - sqs:SendMessage
+              Resource:
+                - !GetAtt WebhookDeliveryQueue.Arn
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+      Events:
+        CreateWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks
+            Method: POST
+        ListWebhooks:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks
+            Method: GET
+        GetWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks/{id}
+            Method: GET
+        DeleteWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks/{id}
+            Method: DELETE
+        TestWebhook:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks/{id}/test
+            Method: POST
+        GetWebhookDeliveries:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks/{id}/deliveries
+            Method: GET
+        RotateWebhookSecret:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /webhooks/{id}/rotate-secret
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - webhook.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # AI Risk Assessment Function
+  AIRiskFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-ai-risk
+      Handler: login-handler.handler
+      CodeUri: src/handlers/
+      Description: AI-powered risk assessment (integrated with login)
+      MemorySize: 512
+      Timeout: 30
+      Environment:
+        Variables:
+          BEDROCK_MODEL_ID: anthropic.claude-3-haiku-20240307-v1:0
+          AI_RISK_ENABLED: 'true'
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+              Resource:
+                - arn:aws:bedrock:eu-central-1::foundation-model/anthropic.claude-3-haiku-20240307-v1:0
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - login-handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # Session Handler Function
+  SessionHandlerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-sessions
+      Handler: session.handler.handler
+      CodeUri: src/handlers/
+      Description: Session management handler (list, revoke, impossible travel)
+      MemorySize: 256
+      Timeout: 30
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Verify
+                - kms:GetPublicKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        ListSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /sessions
+            Method: GET
+        GetSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /sessions/{id}
+            Method: GET
+        RevokeSession:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /sessions/{id}
+            Method: DELETE
+        RevokeAllSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /sessions
+            Method: DELETE
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - session.handler.ts
+        External:
+          - "@aws-sdk/*"
+
+  # ============================================
+  # SQS Queue for Webhook Delivery
+  # ============================================
+  WebhookDeliveryQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: zalt-webhook-delivery
+      VisibilityTimeout: 120
+      MessageRetentionPeriod: 1209600
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt WebhookDeliveryDLQ.Arn
+        maxReceiveCount: 5
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+
+  WebhookDeliveryDLQ:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: zalt-webhook-delivery-dlq
+      MessageRetentionPeriod: 1209600
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ============================================
+  # API Gateway
+  # ============================================
+  AuthApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: zalt-api
+      StageName: prod
+      Description: Zalt Auth Platform REST API
+      EndpointConfiguration:
+        Type: REGIONAL
+      Cors:
+        AllowMethods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        AllowHeaders: "'Content-Type,Authorization,X-Requested-With,X-Request-ID,X-Realm-ID'"
+        AllowOrigin: "'*'"
+        MaxAge: "'86400'"
+      MethodSettings:
+        - ResourcePath: /*
+          HttpMethod: '*'
+          ThrottlingBurstLimit: 1000
+          ThrottlingRateLimit: 500
+          MetricsEnabled: true
+          LoggingLevel: INFO
+      Tags:
+        Application: zalt-auth-platform
+        Environment: !Ref Environment
+
+
+  # ============================================
+  # AWS WAF - Security Protection
+  # ============================================
+  ZaltWAF:
+    Type: AWS::WAFv2::WebACL
+    Properties:
+      Name: zalt-auth-waf
+      Scope: REGIONAL
+      Description: WAF protection for Zalt.io Auth API
+      DefaultAction:
+        Block:
+          CustomResponse:
+            ResponseCode: 404
+            CustomResponseBodyKey: notfound
+      CustomResponseBodies:
+        notfound:
+          ContentType: TEXT_PLAIN
+          Content: "404 page not found"
+        ratelimit:
+          ContentType: APPLICATION_JSON
+          Content: '{"error":"Too many requests","code":"RATE_LIMITED"}'
+      VisibilityConfig:
+        SampledRequestsEnabled: true
+        CloudWatchMetricsEnabled: true
+        MetricName: ZaltAuthWAF
+      Rules:
+        # Rule 0: Block root path explicitly
+        - Name: BlockRootPath
+          Priority: 0
+          Statement:
+            ByteMatchStatement:
+              SearchString: /
+              FieldToMatch:
+                UriPath: {}
+              TextTransformations:
+                - Priority: 0
+                  Type: NONE
+              PositionalConstraint: EXACTLY
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 404
+                CustomResponseBodyKey: notfound
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlockRootPath
+
+        # Rule 1: Allow known API paths (NO health - internal only via CloudWatch)
+        - Name: AllowKnownPaths
+          Priority: 1
+          Statement:
+            OrStatement:
+              Statements:
+                - ByteMatchStatement:
+                    SearchString: /login
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+                - ByteMatchStatement:
+                    SearchString: /register
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+                - ByteMatchStatement:
+                    SearchString: /refresh
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+                - ByteMatchStatement:
+                    SearchString: /logout
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+                - ByteMatchStatement:
+                    SearchString: /v1/admin/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: /oauth/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: /.well-known/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                # New auth endpoints - MFA, Password Reset, Email Verification, WebAuthn
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/mfa/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/password-reset/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/verify-email/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/webauthn/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                # Social Login (Google/Apple OAuth)
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/social/
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                # RBAC - Organizations, Memberships, Roles
+                - ByteMatchStatement:
+                    SearchString: /v1/admin/organizations
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                - ByteMatchStatement:
+                    SearchString: /v1/admin/roles
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: STARTS_WITH
+                # RBAC - Organization switching and permissions
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/organizations
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/switch-organization
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+                - ByteMatchStatement:
+                    SearchString: /v1/auth/permissions
+                    FieldToMatch:
+                      UriPath: {}
+                    TextTransformations:
+                      - Priority: 0
+                        Type: LOWERCASE
+                    PositionalConstraint: EXACTLY
+          Action:
+            Allow: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AllowKnownPaths
+
+        # Rule 2: Rate limiting - Login (5 req/15min per IP)
+        - Name: RateLimitLogin
+          Priority: 2
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              AggregateKeyType: IP
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: /login
+                  FieldToMatch:
+                    UriPath: {}
+                  TextTransformations:
+                    - Priority: 0
+                      Type: LOWERCASE
+                  PositionalConstraint: EXACTLY
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                CustomResponseBodyKey: ratelimit
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitLogin
+
+        # Rule 3: Rate limiting - Register (3 req/hour per IP)  
+        - Name: RateLimitRegister
+          Priority: 3
+          Statement:
+            RateBasedStatement:
+              Limit: 100
+              AggregateKeyType: IP
+              ScopeDownStatement:
+                ByteMatchStatement:
+                  SearchString: /register
+                  FieldToMatch:
+                    UriPath: {}
+                  TextTransformations:
+                    - Priority: 0
+                      Type: LOWERCASE
+                  PositionalConstraint: EXACTLY
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 429
+                CustomResponseBodyKey: ratelimit
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: RateLimitRegister
+
+        # Rule 4: AWS Managed - Common Attack Protection
+        - Name: AWSManagedCommonRules
+          Priority: 4
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesCommonRuleSet
+              ExcludedRules: []
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedCommonRules
+
+        # Rule 5: AWS Managed - Known Bad Inputs
+        - Name: AWSManagedKnownBadInputs
+          Priority: 5
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesKnownBadInputsRuleSet
+              ExcludedRules: []
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedKnownBadInputs
+
+        # Rule 6: AWS Managed - SQL Injection Protection
+        - Name: AWSManagedSQLi
+          Priority: 6
+          Statement:
+            ManagedRuleGroupStatement:
+              VendorName: AWS
+              Name: AWSManagedRulesSQLiRuleSet
+              ExcludedRules: []
+          OverrideAction:
+            None: {}
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: AWSManagedSQLi
+
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+
+  # WAF Association with API Gateway
+  # TEMPORARILY DISABLED - Will be added via AWS CLI after deployment
+  # The SAM implicit stage creation causes timing issues with WAF association
+  # ZaltWAFAssociation:
+  #   Type: AWS::WAFv2::WebACLAssociation
+  #   Properties:
+  #     ResourceArn: !Sub 'arn:aws:apigateway:${AWS::Region}::/restapis/${AuthApi}/stages/prod'
+  #     WebACLArn: !GetAtt ZaltWAF.Arn
+
+  # ============================================
+  # CloudWatch Dashboard
+  # ============================================
+  MonitoringDashboard:
+    Type: AWS::CloudWatch::Dashboard
+    Properties:
+      DashboardName: Zalt-Auth-Platform-Dashboard
+      DashboardBody: !Sub |
+        {
+          "widgets": [
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda Invocations",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/Lambda", "Invocations", "FunctionName", "zalt-login"],
+                  [".", ".", ".", "zalt-register"],
+                  [".", ".", ".", "zalt-refresh"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 0,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "Lambda Errors",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/Lambda", "Errors", "FunctionName", "zalt-login"],
+                  [".", ".", ".", "zalt-register"],
+                  [".", ".", ".", "zalt-refresh"]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 0,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "API Gateway Requests",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/ApiGateway", "Count", "ApiName", "zalt-api"],
+                  [".", "4XXError", ".", "."],
+                  [".", "5XXError", ".", "."]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            },
+            {
+              "type": "metric",
+              "x": 12,
+              "y": 6,
+              "width": 12,
+              "height": 6,
+              "properties": {
+                "title": "DynamoDB",
+                "region": "${AWS::Region}",
+                "metrics": [
+                  ["AWS/DynamoDB", "ConsumedReadCapacityUnits", "TableName", "zalt-users"],
+                  [".", "ConsumedWriteCapacityUnits", ".", "."]
+                ],
+                "period": 300,
+                "stat": "Sum"
+              }
+            }
+          ]
+        }
+
+  # ============================================
+  # Tediyat Multi-Tenant Auth Function
+  # ============================================
+  TediyatFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: zalt-tediyat
+      Handler: tediyat-handler.handler
+      CodeUri: src/handlers/
+      Description: Tediyat multi-tenant authentication handler
+      MemorySize: 512
+      Timeout: 30
+      AutoPublishAlias: live
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+                - dynamodb:Query
+                - dynamodb:Scan
+              Resource:
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-users/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-sessions/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-realms
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-organizations
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-organizations/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-memberships
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-memberships/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-roles
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-roles/index/*
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-tediyat
+                - arn:aws:dynamodb:eu-central-1:986906625644:table/zalt-tediyat/index/*
+            - Effect: Allow
+              Action:
+                - ses:SendEmail
+                - ses:SendRawEmail
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - secretsmanager:GetSecretValue
+              Resource:
+                - arn:aws:secretsmanager:eu-central-1:986906625644:secret:zalt/jwt-secrets*
+            - Effect: Allow
+              Action:
+                - kms:Sign
+                - kms:Verify
+                - kms:GetPublicKey
+                - kms:DescribeKey
+              Resource:
+                - arn:aws:kms:eu-central-1:986906625644:key/fa16a08f-aa50-4113-af73-155a31d13d49
+      Events:
+        # Auth endpoints
+        TediyatRegister:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/auth/register
+            Method: POST
+        TediyatLogin:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/auth/login
+            Method: POST
+        TediyatSessions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/auth/sessions
+            Method: GET
+        TediyatSessionTerminate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/auth/sessions/{sessionId}
+            Method: DELETE
+        TediyatPermissions:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/auth/permissions
+            Method: GET
+        # Tenant endpoints
+        TediyatTenantCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants
+            Method: POST
+        TediyatTenantList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants
+            Method: GET
+        TediyatTenantSwitch:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/switch
+            Method: POST
+        # Member endpoints
+        TediyatMemberList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/members
+            Method: GET
+        TediyatMemberUpdate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/members/{userId}
+            Method: PATCH
+        TediyatMemberRemove:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/members/{userId}
+            Method: DELETE
+        # Invitation endpoints
+        TediyatInvitationCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/invitations
+            Method: POST
+        TediyatInvitationAccept:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/invitations/{token}/accept
+            Method: POST
+        # Role endpoints
+        TediyatRoleList:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/roles
+            Method: GET
+        TediyatRoleCreate:
+          Type: Api
+          Properties:
+            RestApiId: !Ref AuthApi
+            Path: /v1/tediyat/tenants/{tenantId}/roles
+            Method: POST
+    Metadata:
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: true
+        Target: "es2022"
+        Sourcemap: false
+        EntryPoints:
+          - tediyat-handler.ts
+        External:
+          - "@aws-sdk/*"
+          - "mock-aws-s3"
+          - "aws-sdk"
+          - "nock"
+
+  # ============================================
+  # CloudWatch Alarms
+  # ============================================
+  HighErrorRateAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: Zalt-HighErrorRate
+      AlarmDescription: Lambda errors exceed threshold
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Dimensions:
+        - Name: FunctionName
+          Value: zalt-login
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 10
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: notBreaching
+
+  # ============================================
+  # DynamoDB Tables - Multi-Tenant RBAC
+  # ============================================
+  
+  # Organizations Table
+  OrganizationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-organizations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: realm_id
+          AttributeType: S
+        - AttributeName: slug
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: realm-slug-index
+          KeySchema:
+            - AttributeName: realm_id
+              KeyType: HASH
+            - AttributeName: slug
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Memberships Table
+  MembershipsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-memberships
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Roles Table
+  RolesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-roles
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+
+  # Tediyat Multi-Tenant Table (Tenants, Invitations)
+  TediyatTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-tediyat
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: GSI1PK
+          AttributeType: S
+        - AttributeName: GSI1SK
+          AttributeType: S
+        - AttributeName: GSI2PK
+          AttributeType: S
+        - AttributeName: GSI2SK
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema:
+            - AttributeName: GSI1PK
+              KeyType: HASH
+            - AttributeName: GSI1SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+        - IndexName: GSI2
+          KeySchema:
+            - AttributeName: GSI2PK
+              KeyType: HASH
+            - AttributeName: GSI2SK
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Customer
+          Value: tediyat
+
+  # ============================================
+  # DynamoDB Tables - Game-Changer Features
+  # ============================================
+
+  # Machines Table (M2M Authentication)
+  MachinesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-machines
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: client_id
+          AttributeType: S
+        - AttributeName: realm_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: client-id-index
+          KeySchema:
+            - AttributeName: client_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: realm-index
+          KeySchema:
+            - AttributeName: realm_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # User API Keys Table
+  UserAPIKeysTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-user-api-keys
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: key_hash
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: key-hash-index
+          KeySchema:
+            - AttributeName: key_hash
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: user-index
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Invitations Table
+  InvitationsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-invitations
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: token
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: tenant_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: token-index
+          KeySchema:
+            - AttributeName: token
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: tenant-index
+          KeySchema:
+            - AttributeName: tenant_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Webhooks Table
+  WebhooksTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-webhooks
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: realm_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: realm-index
+          KeySchema:
+            - AttributeName: realm_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Webhook Deliveries Table
+  WebhookDeliveriesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-webhook-deliveries
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: webhook_id
+          AttributeType: S
+        - AttributeName: created_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: webhook-index
+          KeySchema:
+            - AttributeName: webhook_id
+              KeyType: HASH
+            - AttributeName: created_at
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Waitlist Table
+  WaitlistTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-waitlist
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+        - AttributeName: realm_id
+          AttributeType: S
+        - AttributeName: status
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: realm-status-index
+          KeySchema:
+            - AttributeName: realm_id
+              KeyType: HASH
+            - AttributeName: status
+              KeyType: RANGE
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Billing Plans Table
+  BillingPlansTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-billing-plans
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: realm_id
+          AttributeType: S
+        - AttributeName: stripe_price_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: realm-index
+          KeySchema:
+            - AttributeName: realm_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: stripe-price-index
+          KeySchema:
+            - AttributeName: stripe_price_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Subscriptions Table
+  SubscriptionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-subscriptions
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: tenant_id
+          AttributeType: S
+        - AttributeName: stripe_subscription_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: tenant-index
+          KeySchema:
+            - AttributeName: tenant_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+        - IndexName: stripe-index
+          KeySchema:
+            - AttributeName: stripe_subscription_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: game-changer
+
+  # Platform Customers Table (B2B companies using Zalt.io)
+  CustomersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-customers
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: email-index
+          KeySchema:
+            - AttributeName: email
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: platform
+
+  # Platform API Keys Table (pk_live_xxx, sk_live_xxx)
+  PlatformAPIKeysTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: zalt-platform-api-keys
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: S
+        - AttributeName: SK
+          AttributeType: S
+        - AttributeName: key_prefix
+          AttributeType: S
+      KeySchema:
+        - AttributeName: PK
+          KeyType: HASH
+        - AttributeName: SK
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: key-prefix-index
+          KeySchema:
+            - AttributeName: key_prefix
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      Tags:
+        - Key: Application
+          Value: zalt-auth-platform
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Feature
+          Value: platform
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${AuthApi}.execute-api.${AWS::Region}.amazonaws.com/prod'
+
+  CustomDomainEndpoint:
+    Description: Custom domain endpoint (configured by AWS Kiro)
+    Value: 'https://api.zalt.io'
+
+  DashboardUrl:
+    Description: CloudWatch Dashboard URL
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/cloudwatch/home?region=${AWS::Region}#dashboards:name=Zalt-Auth-Platform-Dashboard'

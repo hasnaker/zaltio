@@ -1,0 +1,47 @@
+{
+  "name": "Zalt.io Auto Task Executor",
+  "description": "Otomatik task execution + test + dokümantasyon",
+  "version": "1.0.0",
+  "hooks": [
+    {
+      "id": "zalt-execute-next-task",
+      "name": "🚀 Execute Next Zalt Task",
+      "trigger": "manual",
+      "description": "Sıradaki TODO task'ı otomatik çalıştır, test et, dökümante et",
+      "action": {
+        "type": "agent",
+        "prompt": "Zalt.io task executor modunda çalış:\n\n1. .kiro/specs/zalt-auth-platform/tasks.md dosyasını oku\n2. İlk ⬜ TODO durumundaki task'ı bul\n3. Task'ı implement et (tüm dosyaları oluştur)\n4. Unit testleri yaz ve çalıştır\n5. E2E testleri yaz ve çalıştır\n6. Testler geçerse:\n   - Task durumunu ✅ DONE yap\n   - docs/tasks/TASK-X.X-REPORT.md raporu oluştur\n   - Sonraki task'a geç\n7. Testler başarısız olursa:\n   - Task durumunu ❌ FAILED yap\n   - Hatayı düzelt ve tekrar dene (max 3 deneme)\n8. Her task sonrası ilerleme raporu ver\n\nKATI KURALLAR:\n- Test coverage %80+ olmalı\n- Güvenlik açığı varsa DURMA\n- Her task için detaylı rapor yaz\n- Checkpoint'larda özet ver"
+      }
+    },
+    {
+      "id": "zalt-execute-all",
+      "name": "🔥 Execute ALL Zalt Tasks (Full Auto)",
+      "trigger": "manual", 
+      "description": "Tüm taskları sırayla otomatik çalıştır - UZUN SÜRER",
+      "action": {
+        "type": "agent",
+        "prompt": "FULL AUTO MODE - Zalt.io tüm taskları çalıştır:\n\n1. .kiro/specs/zalt-auth-platform/tasks.md oku\n2. Phase 0'dan başla\n3. Her task için:\n   a. Implement et\n   b. Test et (unit + e2e)\n   c. Dökümante et (docs/tasks/TASK-X.X-REPORT.md)\n   d. Task durumunu güncelle\n   e. Sonraki task'a geç\n4. Checkpoint'larda özet rapor yaz\n5. Phase bitince PHASE-X-SUMMARY.md oluştur\n6. Tüm tasklar bitince FINAL-REPORT.md oluştur\n\nDURMA KOŞULLARI:\n- 3 ardışık test failure\n- Güvenlik açığı tespit\n- Kritik hata\n\nBu durumda rapor yaz ve kullanıcıya sor."
+      }
+    },
+    {
+      "id": "zalt-generate-docs",
+      "name": "📚 Generate Full Documentation",
+      "trigger": "manual",
+      "description": "Tüm tamamlanan tasklar için dokümantasyon oluştur",
+      "action": {
+        "type": "agent",
+        "prompt": "Zalt.io dokümantasyon generator:\n\n1. Tamamlanan tüm taskları tara\n2. Her task için docs/tasks/TASK-X.X-REPORT.md oluştur\n3. API dokümantasyonu oluştur (docs/api/)\n4. SDK dokümantasyonu oluştur (docs/sdk/)\n5. Security dokümantasyonu oluştur (docs/security/)\n6. README.md güncelle\n7. CHANGELOG.md güncelle\n\nDokümantasyon formatı:\n- Markdown\n- Code örnekleri\n- Mermaid diyagramları\n- Test coverage raporları"
+      }
+    },
+    {
+      "id": "zalt-security-audit",
+      "name": "🔒 Security Audit",
+      "trigger": "manual",
+      "description": "Güvenlik denetimi yap ve rapor oluştur",
+      "action": {
+        "type": "agent",
+        "prompt": "Zalt.io güvenlik denetimi:\n\n1. Auth-Security-Research/ZALT-SECURITY-CHECKLIST.md oku\n2. Tüm implementasyonları kontrol et\n3. Her güvenlik kontrolü için:\n   - Implementasyon var mı?\n   - Test var mı?\n   - Doğru çalışıyor mu?\n4. Eksikleri listele\n5. Risk skorunu hesapla\n6. docs/security/SECURITY-AUDIT-REPORT.md oluştur\n7. Kritik eksikler varsa uyar"
+      }
+    }
+  ]
+}

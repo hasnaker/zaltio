@@ -1,0 +1,71 @@
+{
+  "name": "@zalt.io/next",
+  "version": "1.0.1",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Zalt.io Authentication SDK - Next.js middleware and SSR support",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./middleware": {
+      "import": "./dist/middleware.mjs",
+      "require": "./dist/middleware.js",
+      "types": "./dist/middleware.d.ts"
+    },
+    "./server": {
+      "import": "./dist/server.mjs",
+      "require": "./dist/server.js",
+      "types": "./dist/server.d.ts"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts src/middleware.ts src/server.ts --format cjs,esm --sourcemap --external next --external react",
+    "dev": "tsup src/index.ts src/middleware.ts src/server.ts --format cjs,esm --dts --watch --external next --external react",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "zalt",
+    "authentication",
+    "auth",
+    "nextjs",
+    "middleware",
+    "ssr",
+    "typescript"
+  ],
+  "author": "Zalt.io",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zalt-io/zalt-sdk"
+  },
+  "homepage": "https://zalt.io",
+  "dependencies": {
+    "@zalt.io/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "fast-check": "^3.15.0",
+    "next": "^14.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.0.0"
+  },
+  "peerDependencies": {
+    "next": ">=13.0.0"
+  },
+  "sideEffects": false
+}

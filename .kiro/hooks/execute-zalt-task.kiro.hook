@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Execute Next Zalt Task",
+  "description": "Manually trigger to execute the next pending task from the Zalt.io authentication platform roadmap",
+  "version": "1",
+  "when": {
+    "type": "agentStop"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "ZALT.IO AUTO EXECUTOR - FULL MODE\n\n1. TASK BUL:\n   - .kiro/specs/zalt-auth-platform/tasks.md oku\n   - İlk ⬜ TODO task'ı bul\n\n2. IMPLEMENT ET:\n   - Task'taki dosyaları oluştur\n   - Kodu yaz (src/handlers/, src/services/, src/utils/)\n   - Mevcut pattern'leri takip et\n\n3. TEST YAZ VE ÇALIŞTIR:\n   - Unit test: src/xxx/xxx.test.ts\n   - E2E test: src/tests/e2e/xxx.e2e.test.ts\n   - npm run test çalıştır\n   - Coverage %80+ olmalı\n\n4. DÖKÜMANTE ET:\n   - docs/tasks/TASK-X.X-REPORT.md oluştur\n   - Test sonuçlarını yaz\n   - Güvenlik notlarını ekle\n\n5. TASK DURUMUNU GÜNCELLE:\n   - Testler geçti → ⬜ yerine ✅ yaz\n   - Testler başarısız → ⬜ yerine ❌ yaz\n\n6. SONRAKİ TASK'A GEÇ:\n   - Otomatik devam et\n   - Checkpoint'larda özet ver\n\nDURMA KOŞULLARI:\n- 3 ardışık test failure\n- Güvenlik açığı tespit\n- Kritik hata\n\nGÜVENLİK KURALLARI:\n- Argon2id (32MB, timeCost 5)\n- RS256 JWT\n- NO SMS MFA\n- Rate limiting ZORUNLU\n- Audit logging ZORUNLU\n"
+  }
+}

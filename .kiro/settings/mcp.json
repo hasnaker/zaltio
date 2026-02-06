@@ -1,0 +1,42 @@
+{
+  "mcpServers": {
+    "awslabs.aws-iac-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-iac-mcp-server@latest",
+        "--allow-write"
+      ],
+      "env": {
+        "AWS_REGION": "eu-central-1",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "sam_build",
+        "sam_deploy",
+        "sam_delete",
+        "cfn_describe_stack",
+        "cfn_list_stacks",
+        "cfn_delete_stack",
+        "troubleshoot_cloudformation_deployment"
+      ]
+    },
+    "awslabs.aws-serverless-mcp": {
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-serverless-mcp@latest",
+        "--allow-write"
+      ],
+      "env": {
+        "AWS_REGION": "eu-central-1",
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "sam_build",
+        "sam_deploy",
+        "sam_logs"
+      ]
+    }
+  }
+}

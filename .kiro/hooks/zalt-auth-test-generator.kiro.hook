@@ -1,0 +1,14 @@
+{
+  "enabled": true,
+  "name": "Zalt Auth Test Generator",
+  "description": "Automatically generate auth-related tests when auth files are modified",
+  "version": "1",
+  "when": {
+    "type": "fileSave",
+    "pattern": "**/packages/**/*.ts"
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "A Zalt SDK file was saved. Check if it needs test coverage:\n\n1. If the file is in packages/core/src/, packages/react/src/, or packages/next/src/\n2. Check if corresponding .test.ts file exists\n3. If no test file exists, create one with:\n   - Unit tests for all exported functions\n   - Edge case tests\n   - Error handling tests\n4. If test file exists, check coverage and add missing tests\n\nTest patterns:\n- Use Jest + fast-check for property-based tests\n- Mock external dependencies\n- Test error scenarios\n- Minimum 80% coverage target\n\nDO NOT modify the source file, only create/update test files."
+  }
+}
