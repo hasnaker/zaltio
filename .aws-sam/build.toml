@@ -33,6 +33,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.7adb8790-d551-46da-939d-9b8315f80d71]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -51,6 +52,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["login-handler.ts"]
 External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
+
 
 
 
@@ -99,6 +101,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.a2da01a5-6b2c-4311-ad9b-209e2f607476]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -117,6 +120,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["refresh-handler.ts"]
 External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
+
 
 
 
@@ -165,6 +169,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.e9964bab-d10b-4c44-b72b-7bddc1994984]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -198,6 +203,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.5b7b2da5-7d34-4a76-a81e-0ce0965cb994]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -216,6 +222,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["sso-handler.ts"]
 External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
+
 
 
 
@@ -266,6 +273,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.0fd70034-c0b9-425e-a274-9e461ab4956a]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -284,6 +292,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["mfa-handler.ts"]
 External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
+
 
 
 
@@ -332,6 +341,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.568db9fe-fbe9-4cf3-b64b-26fdc3efac97]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -350,6 +360,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["whatsapp-mfa-handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -398,6 +409,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.ce1fe2f1-5870-4ebf-b1cd-8f769b7f35b2]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -416,6 +428,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["verify-email-handler.ts"]
 External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
+
 
 
 
@@ -464,6 +477,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.0708bb5c-d22f-46fa-800d-f17422663ade]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -482,6 +496,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["social-handler.ts"]
 External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
+
 
 
 
@@ -530,6 +545,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.1d8853d1-fb82-4374-bb46-e3ebd91a239e]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -548,6 +564,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["membership-handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -596,6 +613,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.322aabb1-c375-48e2-a507-80abdc36a6a3]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -614,6 +632,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["org-switch-handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -661,6 +680,7 @@ External = ["@aws-sdk/*", "mock-aws-s3", "aws-sdk", "nock"]
 
 
 
+
 [function_build_definitions.756f32b5-05f9-47c1-aebc-a99369440d4a]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -679,6 +699,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["machine-handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -717,6 +738,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.b32d22c3-5619-4a58-bd98-06532edcf9bb]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -735,6 +757,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["reverification.handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -773,6 +796,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.690c1a95-8d58-4c88-93c9-e701e205f137]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -791,6 +815,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["impersonation.handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -829,6 +854,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.f35be3e3-b1e2-49b3-a041-bfb3a06507cd]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -847,6 +873,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["webhook-delivery.handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -885,6 +912,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.227f2c67-9ee1-445f-b6a5-6f6d0990dff1]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -903,6 +931,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["login-handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -941,6 +970,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.de680661-ba28-4aba-a388-222915dbd3aa]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers/platform"
 runtime = "nodejs20.x"
@@ -959,6 +989,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["customer-login.handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -995,6 +1026,7 @@ External = ["@aws-sdk/*"]
 
 
 
+
 [function_build_definitions.e2d895ef-6e3f-420b-8ab4-e162a0c894e8]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers/platform"
 runtime = "nodejs20.x"
@@ -1013,6 +1045,7 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["api-keys.handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 
 
@@ -1050,6 +1083,7 @@ Banner = ["js=// Zalt.io Platform Register Handler"]
 
 
 
+
 [function_build_definitions.c95a3ad9-5174-4ad6-b633-ab44af5a1a82]
 codeuri = "/Users/hasanaker/Desktop/Masaüstü - Hasan MacBook Pro/The Hasan Aker Project/Auth/src/handlers"
 runtime = "nodejs20.x"
@@ -1068,5 +1102,6 @@ Target = "es2022"
 Sourcemap = false
 EntryPoints = ["waitlist_handler.ts"]
 External = ["@aws-sdk/*"]
+
 
 [layer_build_definitions]
